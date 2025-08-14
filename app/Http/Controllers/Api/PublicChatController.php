@@ -76,14 +76,26 @@ class PublicChatController extends Controller
             ]);
         }
 
+        // إنشاء رسالة المستخدم
+        $userMessage = $conversation->messages()->create([
+            'content' => $request->message,
+            'role' => 'user',
+            'metadata' => [
+                'ip_address' => $userIdentifier,
+                'user_agent' => $request->userAgent(),
+                'timestamp' => now()->toISOString(),
+            ],
+        ]);
+
         // وضع الرسالة في الطابور للمعالجة
-        ProcessChatMessage::dispatch($conversation, $request->message, $sessionId);
+        ProcessChatMessage::dispatch($conversation, $userMessage);
 
         // تحديث حالة المحادثة لإظهار أن الروبوت "يكتب"
         Cache::put("conversation_status_{$sessionId}", 'processing', 300);
 
         return response()->json([
             'success' => true,
+            'conversation_id' => $conversation->id,
             'session_id' => $sessionId,
             'message' => 'تم إرسال رسالتك. سيرد الروبوت قريباً...',
             'status' => 'processing'

@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Events\MessageSent;
 use App\Models\Conversation;
 use App\Models\Message;
 use App\Services\OllamaService;
@@ -10,47 +11,34 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class ProcessChatMessage implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    protected $conversation;
-    protected $message;
-    protected $sessionId;
+    protected Conversation $conversation;
 
-    public function __construct(Conversation $conversation, string $message, string $sessionId)
+    protected Message $userMessage;
+
+    public function __construct(Conversation $conversation, Message $userMessage)
     {
         $this->conversation = $conversation;
-        $this->message = $message;
-        $this->sessionId = $sessionId;
+        $this->userMessage = $userMessage;
     }
 
     public function handle(OllamaService $ollamaService)
     {
         try {
-            // تحديث حالة المحادثة
-            Cache::put("conversation_status_{$this->sessionId}", 'processing', 300);
-            
-            // حفظ رسالة المستخدم
-            $userMessage = Message::create([
-                'conversation_id' => $this->conversation->id,
-                'role' => 'user',
-                'content' => $this->message,
-            ]);
-
             // إعداد الرسائل للإرسال إلى Ollama
             $messages = $this->prepareMessages();
 
             $startTime = microtime(true);
-            
+
             // إرسال الطلب إلى Ollama
             $response = $ollamaService->generateResponse(
-                $this->conversation->chatbot->model_name,
-                $messages,
-                $this->conversation->chatbot->settings ?? []
+                $this->conversation->chatbot->model_name ?? 'qwen2.5-coder:latest',
+                $messages
             );
 
             $processingTime = microtime(true) - $startTime;
@@ -59,37 +47,35 @@ class ProcessChatMessage implements ShouldQueue
                 // حفظ رد الروبوت
                 $botMessage = Message::create([
                     'conversation_id' => $this->conversation->id,
-                    'role' => 'assistant',
                     'content' => $response['message']['content'],
-                    'tokens_used' => $response['eval_count'] ?? null,
-                    'processing_time' => $processingTime,
+                    'role' => 'assistant',
                     'metadata' => [
-                        'model' => $this->conversation->chatbot->model_name,
+                        'model' => $this->conversation->chatbot->model_name ?? 'qwen2.5-coder:latest',
+                        'tokens_used' => $response['eval_count'] ?? null,
+                        'processing_time' => $processingTime,
                         'eval_duration' => $response['eval_duration'] ?? null,
                         'load_duration' => $response['load_duration'] ?? null,
+                        'timestamp' => now()->toISOString(),
                     ],
+                    'tokens_used' => $response['eval_count'] ?? null,
+                    'processing_time' => $processingTime,
                 ]);
 
                 // تحديث إحصائيات المحادثة والروبوت
                 $this->updateStatistics();
 
-                // زيادة عداد رسائل المستأجر
-                $this->conversation->tenant->incrementMessageCounter();
-
-                // حفظ الرد في الكاش
-                Cache::put("chat_response_{$this->sessionId}", [
-                    'message' => [
-                        'content' => $response['message']['content']
-                    ],
-                    'processing_time' => $processingTime,
-                    'tokens_used' => $response['eval_count'] ?? 0,
-                ], 300);
-
-                Cache::put("conversation_status_{$this->sessionId}", 'completed', 300);
+                // إرسال البث المباشر للرسالة
+                Log::info('إرسال البث المباشر للرسالة', [
+                    'session_id' => $this->conversation->session_id,
+                    'channel' => 'conversation.'.$this->conversation->session_id,
+                    'message_id' => $botMessage->id,
+                    'message_role' => $botMessage->role,
+                ]);
+                broadcast(new MessageSent($botMessage, $this->conversation));
 
                 Log::info('تمت معالجة رسالة الدردشة بنجاح', [
                     'conversation_id' => $this->conversation->id,
-                    'session_id' => $this->sessionId,
+                    'session_id' => $this->conversation->session_id,
                     'processing_time' => $processingTime,
                 ]);
             } else {
@@ -98,16 +84,25 @@ class ProcessChatMessage implements ShouldQueue
         } catch (\Exception $e) {
             Log::error('خطأ في معالجة رسالة الدردشة', [
                 'conversation_id' => $this->conversation->id,
-                'session_id' => $this->sessionId,
+                'session_id' => $this->conversation->session_id,
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
-            Cache::put("conversation_status_{$this->sessionId}", 'failed', 300);
-            Cache::put("chat_response_{$this->sessionId}", [
-                'message' => [
-                    'content' => 'عذراً، حدث خطأ في معالجة رسالتك. يرجى المحاولة مرة أخرى.'
-                ]
-            ], 300);
+            // إنشاء رسالة خطأ
+            $errorMessage = Message::create([
+                'conversation_id' => $this->conversation->id,
+                'content' => 'عذراً، حدث خطأ في معالجة رسالتك. يرجى المحاولة مرة أخرى.',
+                'role' => 'assistant',
+                'metadata' => [
+                    'error' => true,
+                    'error_message' => $e->getMessage(),
+                    'timestamp' => now()->toISOString(),
+                ],
+            ]);
+
+            // إرسال رسالة الخطأ عبر البث المباشر
+            broadcast(new MessageSent($errorMessage, $this->conversation))->toOthers();
         }
     }
 
@@ -129,6 +124,7 @@ class ProcessChatMessage implements ShouldQueue
         // الحصول على آخر 10 رسائل من المحادثة للسياق
         $recentMessages = $this->conversation->messages()
             ->whereIn('role', ['user', 'assistant'])
+            ->where('id', '<=', $this->userMessage->id)
             ->orderBy('created_at', 'desc')
             ->take(10)
             ->get()
@@ -141,12 +137,6 @@ class ProcessChatMessage implements ShouldQueue
             ];
         }
 
-        // إضافة الرسالة الحالية
-        $messages[] = [
-            'role' => 'user',
-            'content' => $this->message,
-        ];
-
         return $messages;
     }
 
@@ -156,10 +146,11 @@ class ProcessChatMessage implements ShouldQueue
     private function updateStatistics(): void
     {
         // تحديث وقت آخر نشاط للمحادثة
-        $this->conversation->update(['last_activity' => now()]);
+        $this->conversation->update(['updated_at' => now()]);
 
-        // تحديث إحصائيات الروبوت
-        $this->conversation->chatbot->increment('total_messages', 2); // رسالة المستخدم + رد الروبوت
-        $this->conversation->chatbot->update(['last_activity' => now()]);
+        // تحديث إحصائيات الروبوت إذا كان متوفراً
+        if ($this->conversation->chatbot) {
+            $this->conversation->chatbot->increment('total_messages', 1);
+        }
     }
 }

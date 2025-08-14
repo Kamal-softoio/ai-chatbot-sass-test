@@ -53,15 +53,13 @@ class OllamaService
             $payload = [
                 'model' => $model,
                 'messages' => $messages,
-                'stream' => false, // سنستخدم الردود غير المتدفقة في البداية
-                'options' => [
-                    'temperature' => 1.0,
+                'stream' => false,
+                'options' => array_merge([
+                    'temperature' => 0.7,
                     'top_p' => 0.9,
                     'num_predict' => 2048,
-                ]
+                ], $options)
             ];
-
-            Log::info('الداتا', $payload);
 
             $response = Http::timeout($this->timeout)
                 ->post($this->baseUrl . '/api/chat', $payload);

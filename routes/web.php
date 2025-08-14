@@ -1,9 +1,11 @@
 <?php
+
 // routes/web.php
 
-use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Auth\TenantAuthController;
+use App\Http\Controllers\ChatbotDemoController;
 use App\Http\Controllers\DashboardController;
+use Illuminate\Support\Facades\Route;
 
 /*
 |--------------------------------------------------------------------------
@@ -14,6 +16,10 @@ use App\Http\Controllers\DashboardController;
 Route::get('/', function () {
     return view('welcome');
 });
+
+// Demo route for WebSocket chatbot
+Route::get('/demo', [ChatbotDemoController::class, 'index'])->name('chatbot.demo');
+Route::get('/embed/{chatbotId}', [ChatbotDemoController::class, 'embed'])->name('chatbot.embed');
 
 // مسارات المصادقة للمستأجرين
 Route::prefix('auth')->group(function () {
@@ -27,7 +33,7 @@ Route::prefix('auth')->group(function () {
 // المسارات المحمية بـ Tenant Middleware
 Route::middleware(['tenant'])->group(function () {
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
-    
+
     // مسارات إدارة الروبوتات
     Route::prefix('chatbots')->name('chatbots.')->group(function () {
         Route::get('/', [App\Http\Controllers\ChatbotController::class, 'index'])->name('index');
@@ -37,10 +43,9 @@ Route::middleware(['tenant'])->group(function () {
         Route::get('/{chatbot}/edit', [App\Http\Controllers\ChatbotController::class, 'edit'])->name('edit');
         Route::put('/{chatbot}', [App\Http\Controllers\ChatbotController::class, 'update'])->name('update');
         Route::delete('/{chatbot}', [App\Http\Controllers\ChatbotController::class, 'destroy'])->name('destroy');
-        
+
         // مسارات إضافية
         Route::post('/{chatbot}/test', [App\Http\Controllers\ChatbotController::class, 'test'])->name('test');
         Route::get('/{chatbot}/embed-code', [App\Http\Controllers\ChatbotController::class, 'embedCode'])->name('embed-code');
     });
 });
-
