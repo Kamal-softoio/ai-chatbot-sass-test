@@ -571,20 +571,59 @@ class ChatbotWidget {
                 console.log('Setting up WebSocket channel for session:', this.sessionId);
                 this.conversationChannel = window.Echo.channel(`conversation.${this.sessionId}`)
                     .listen('MessageSent', (e) => {
-                        console.log('Message received via WebSocket:', e);
-                        console.log('Message role:', e.message?.role);
-                        console.log('Message content:', e.message?.content);
-                        // Only show bot messages, not user messages
+                        console.log('🎯 Standard MessageSent event received:', e);
+                        console.log('📊 Event structure:', {
+                            message: e.message,
+                            role: e.message?.role,
+                            content: e.message?.content,
+                            fullEvent: e
+                        });
+                        
+                        // Check if it's an assistant message
                         if (e.message && e.message.role === 'assistant') {
+                            console.log('✅ Processing assistant message:', e.message.content);
                             this.addMessage(e.message.content, 'bot');
                             this.hideTypingIndicator();
+                        } else {
+                            console.log('⚠️ Ignoring message - not assistant role:', e.message?.role);
                         }
                     })
+                    .listen('.MessageSent', (e) => {
+                        console.log('🎯 Alternative MessageSent event received:', e);
+                        console.log('📊 Alternative Event structure:', {
+                            message: e.message,
+                            role: e.message?.role,
+                            content: e.message?.content,
+                            fullEvent: e
+                        });
+                        
+                        // Check if it's an assistant message
+                        if (e.message && e.message.role === 'assistant') {
+                            console.log('✅ Processing alternative assistant message:', e.message.content);
+                            this.addMessage(e.message.content, 'bot');
+                            this.hideTypingIndicator();
+                        } else {
+                            console.log('⚠️ Ignoring alternative message - not assistant role:', e.message?.role);
+                        }
+                    })
+                    .listenForWhisper('MessageSent', (e) => {
+                        console.log('🎯 Whisper MessageSent event received:', e);
+                    })
                     .subscribed(() => {
-                        console.log('Successfully subscribed to channel:', `conversation.${this.sessionId}`);
+                        console.log('✅ Successfully subscribed to channel:', `conversation.${this.sessionId}`);
+                        console.log('📡 Channel object:', this.conversationChannel);
+                        
+                        // Listen to all events on this channel for debugging
+                        if (this.conversationChannel.pusher) {
+                            this.conversationChannel.pusher.bind_global((eventName, data) => {
+                                if (eventName.includes('MessageSent')) {
+                                    console.log('🔥 Global event captured:', eventName, data);
+                                }
+                            });
+                        }
                     })
                     .error((error) => {
-                        console.error('WebSocket channel error:', error);
+                        console.error('❌ WebSocket channel error:', error);
                     });
 
                 // Update connection status

@@ -301,33 +301,67 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     
     <script>
+        // Debug function to check if scripts are loaded
+        function checkScriptsLoaded() {
+            console.log('=== Script Loading Debug ===');
+            console.log('window.Echo available:', typeof window.Echo !== 'undefined');
+            console.log('window.ChatbotWidget available:', typeof window.ChatbotWidget !== 'undefined');
+            console.log('window.axios available:', typeof window.axios !== 'undefined');
+            
+            if (typeof window.ChatbotWidget !== 'undefined') {
+                console.log('✅ ChatbotWidget is loaded');
+            } else {
+                console.log('❌ ChatbotWidget is not loaded');
+            }
+        }
+
         // Initialize chatbot when page loads
-        document.addEventListener('DOMContentLoaded', function() {
-            // Initialize the chatbot widget
-            const chatbot = new ChatbotWidget({
-                chatbotId: {{ $chatbot->id }},
-                autoOpen: false,
-                language: 'ar',
-                enableVoice: true,
-                enableFileUpload: true,
-                theme: 'modern'
-            });
+        function initializeChatbot() {
+            // Debug check
+            checkScriptsLoaded();
+            
+            if (typeof ChatbotWidget === 'undefined') {
+                console.log('ChatbotWidget not loaded yet, retrying...');
+                setTimeout(initializeChatbot, 200);
+                return;
+            }
 
-            // Button to open chat
-            document.getElementById('open-chat-btn').addEventListener('click', function() {
-                chatbot.open();
-            });
+            console.log('✅ ChatbotWidget loaded successfully, initializing...');
+            
+            try {
+                // Initialize the chatbot widget
+                const chatbot = new ChatbotWidget({
+                    chatbotId: {{ $chatbot->id }},
+                    autoOpen: false,
+                    language: 'ar',
+                    enableVoice: true,
+                    enableFileUpload: true,
+                    theme: 'modern'
+                });
 
-            // Monitor WebSocket connection status
-            function updateConnectionStatus() {
-                const statusElement = document.getElementById('connection-status');
-                const isConnected = window.Echo && window.Echo.socketId();
-                
-                if (isConnected) {
-                    statusElement.innerHTML = '<span class="status-dot"></span>WebSocket متصل';
-                    statusElement.className = 'status-indicator';
-                } else {
-                    statusElement.innerHTML = '<span class="status-dot"></span>WebSocket غير متصل';
+                console.log('✅ ChatbotWidget initialized successfully');
+
+                // Button to open chat
+                const openChatBtn = document.getElementById('open-chat-btn');
+                if (openChatBtn) {
+                    openChatBtn.addEventListener('click', function() {
+                        console.log('Opening chatbot...');
+                        chatbot.open();
+                    });
+                }
+
+                // Monitor WebSocket connection status
+                function updateConnectionStatus() {
+                    const statusElement = document.getElementById('connection-status');
+                    if (!statusElement) return;
+                    
+                    const isConnected = window.Echo && window.Echo.socketId();
+                    
+                    if (isConnected) {
+                        statusElement.innerHTML = '<span class="status-dot"></span>WebSocket متصل';
+                        statusElement.className = 'status-indicator';
+                    } else {
+                        statusElement.innerHTML = '<span class="status-dot"></span>WebSocket غير متصل';
                     statusElement.className = 'status-indicator offline';
                 }
             }
@@ -335,7 +369,10 @@
             // Check connection status periodically
             setInterval(updateConnectionStatus, 5000);
             setTimeout(updateConnectionStatus, 1000);
-        });
+        }
+
+        // Start initialization when DOM is ready
+        document.addEventListener('DOMContentLoaded', initializeChatbot);
     </script>
 </body>
 </html>
